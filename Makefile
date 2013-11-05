@@ -12,7 +12,7 @@ clean-all: clean-test clean
 
 install:
 	npm install
-	grunt
+	./node_modules/.bin/grunt
 
 force-install: clean-install install
 
