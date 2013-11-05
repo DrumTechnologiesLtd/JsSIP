@@ -14,6 +14,8 @@
     "type": "git",
     "url": "git@github.com:NetDevLtd/JsSIP.git"
   },
+  "private": false,
+  "publishConfig":{"registry":"http://hmon:5984/registry/_design/app/_rewrite"},
   "keywords": [
     "sip",
     "websocket",
