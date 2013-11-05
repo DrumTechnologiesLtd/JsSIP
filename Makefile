@@ -11,8 +11,8 @@ clean-all: clean-test clean
 	rm -rf node_modules *.rpm
 
 install:
-	grunt
 	npm install
+	grunt
 
 force-install: clean-install install
 
