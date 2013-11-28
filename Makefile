@@ -3,12 +3,12 @@
 all: install lint test
 
 clean:
-	rm -rf rpm $(siteDir) dist compiledjs
+	rm -rf dist
 
 clean-test:
 
 clean-all: clean-test clean
-	rm -rf node_modules *.rpm
+	rm -rf node_modules
 
 install:
 	npm install
