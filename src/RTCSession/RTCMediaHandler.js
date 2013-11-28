@@ -110,7 +110,11 @@ RTCMediaHandler.prototype = {
       servers = [],
       config = this.session.ua.configuration;
 
-    servers.push({'url': config.stun_servers});
+    length = config.stun_servers.length;
+    for (idx = 0; idx < length; idx++) {
+      server = config.stun_servers[idx];
+      servers.push({'url': server});
+    }
 
     length = config.turn_servers.length;
     for (idx = 0; idx < length; idx++) {
