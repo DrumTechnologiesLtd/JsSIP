@@ -2,7 +2,7 @@
   "name": "jssip",
   "title": "JsSIP",
   "description": "the Javascript SIP library",
-  "version": "0.3.7-nd",
+  "version": "0.3.7b-nd",
   "homepage": "http://jssip.net",
   "author": "José Luis Millán <jmillan@aliax.net>",
   "contributors": [
