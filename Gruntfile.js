@@ -45,7 +45,7 @@ module.exports = function(grunt) {
     concat: {
       dist: {
         src: srcFiles,
-        dest: 'dist/<%= pkg.name %>-<%= pkg.version %>.js',
+        dest: 'dist/<%= pkg.name %>.js',
         options: {
           banner: '<%= meta.banner %>',
           separator: '\n\n\n',
@@ -56,10 +56,10 @@ module.exports = function(grunt) {
       },
       post_dist: {
         src: [
-          'dist/<%= pkg.name %>-<%= pkg.version %>.js',
+          'dist/<%= pkg.name %>.js',
           'src/Grammar/dist/Grammar.js'
         ],
-        dest: 'dist/<%= pkg.name %>-<%= pkg.version %>.js',
+        dest: 'dist/<%= pkg.name %>.js',
         nonull: true
       },
       devel: {
@@ -85,7 +85,7 @@ module.exports = function(grunt) {
     includereplace: {
       dist: {
         files: {
-          'dist': 'dist/<%= pkg.name %>-<%= pkg.version %>.js'
+          'dist': 'dist/<%= pkg.name %>.js'
         }
       },
       devel: {
@@ -95,7 +95,7 @@ module.exports = function(grunt) {
       }
     },
     jshint: {
-      dist: 'dist/<%= pkg.name %>-<%= pkg.version %>.js',
+      dist: 'dist/<%= pkg.name %>.js',
       devel: 'dist/<%= pkg.name %>-devel.js',
       options: {
         browser: true,
@@ -118,7 +118,7 @@ module.exports = function(grunt) {
     uglify: {
       dist: {
         files: {
-          'dist/<%= pkg.name %>-<%= pkg.version %>.min.js': ['dist/<%= pkg.name %>-<%= pkg.version %>.js']
+          'dist/<%= pkg.name %>.min.js': ['dist/<%= pkg.name %>.js']
         }
       },
       options: {
