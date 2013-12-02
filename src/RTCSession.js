@@ -289,8 +289,8 @@ RTCSession.prototype.answer = function(options) {
 
   window.clearTimeout(this.timers.userNoAnswerTimer);
 
-  if (options.stream) {
-    userMediaSucceeded(options.stream);
+  if (options.mediaStream) {
+    userMediaSucceeded(options.mediaStream);
   } else {
     this.rtcMediaHandler.getUserMedia(
       userMediaSucceeded,
@@ -587,7 +587,7 @@ RTCSession.prototype.connect = function(target, options) {
   } else if (!JsSIP.WebRTC.isSupported) {
     this.failed('local', null, JsSIP.C.causes.WEBRTC_NOT_SUPPORTED);
   } else {
-    this.sendInitialRequest(mediaConstraints, options.stream);
+    this.sendInitialRequest(mediaConstraints, options.mediaStream);
   }
 };
 
