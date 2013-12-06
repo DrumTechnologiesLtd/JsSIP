@@ -936,7 +936,18 @@ UA.configuration_check = {
           return;
         }
 
-        url = JsSIP.Grammar.parse(ws_servers[idx].ws_uri, 'absoluteURI');
+        // Grammar function will reject a URI similar to wss://drumstameet1/webrtc
+        // looks like it dues to the digit on the end of the hostname 'cos
+        // wss://drumstameet/webrtc works fine
+        //url = JsSIP.Grammar.parse(ws_servers[idx].ws_uri, 'absoluteURI');
+        var parser = document.createElement('a');
+        parser.href = ws_servers[idx].ws_uri;
+        url = {
+          // remove colon from the end of the scheme
+          scheme: parser.protocol.slice(0, -1),
+          host: parser.hostname,
+          port: parser.port
+        };
 
         if(url === -1) {
           console.error(LOG_PREFIX +'invalid "ws_uri" attribute in ws_servers parameter: ' + ws_servers[idx].ws_uri);
