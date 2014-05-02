@@ -16,76 +16,104 @@ var RTCMediaHandler = function(session, constraints) {
   this.session = session;
   this.localMedia = null;
   this.peerConnection = null;
+  this.ready = true;
 
   this.init(constraints);
 };
 
 RTCMediaHandler.prototype = {
+  isReady: function() {
+    return this.ready;
+  },
+  
+  createOffer: function(onSuccess, onFailure, constraints) {
+    var self = this;
 
-  createOffer: function(onSuccess, onFailure) {
-    var
-      self = this,
-      sent = false;
-
-    this.onIceCompleted = function() {
-      if (!sent) {
-        sent = true;
+    function onSetLocalDescriptionSuccess() {
+      if (self.peerConnection.iceGatheringState === 'complete' && self.peerConnection.iceConnectionState === 'connected') {
+        self.ready = true;
         onSuccess(self.peerConnection.localDescription.sdp);
+      } else {
+        self.onIceCompleted = function() {
+          self.onIceCompleted = undefined;
+          self.ready = true;
+          onSuccess(self.peerConnection.localDescription.sdp);
+        };
       }
-    };
+    }
+    
+    this.ready = false;
 
     this.peerConnection.createOffer(
       function(sessionDescription){
         self.setLocalDescription(
           sessionDescription,
-          onFailure
+          onSetLocalDescriptionSuccess,
+          function(e) {
+            self.ready = true;
+            onFailure(e);
+          }
         );
       },
       function(e) {
+        self.ready = true;
         self.logger.error('unable to create offer');
         self.logger.error(e);
-        onFailure();
-      }
+        onFailure(e);
+      },
+      constraints
     );
   },
 
-  createAnswer: function(onSuccess, onFailure) {
-    var
-      self = this,
-      sent = false;
+  createAnswer: function(onSuccess, onFailure, constraints) {
+    var self = this;
 
-    this.onIceCompleted = function() {
-      if (!sent) {
-        sent = true;
+    function onSetLocalDescriptionSuccess() {
+      if (self.peerConnection.iceGatheringState === 'complete' && self.peerConnection.iceConnectionState === 'connected') {
+        self.ready = true;
         onSuccess(self.peerConnection.localDescription.sdp);
+      } else {
+        self.onIceCompleted = function() {
+          self.onIceCompleted = undefined;
+          self.ready = true;
+          onSuccess(self.peerConnection.localDescription.sdp);
+        };
       }
-    };
+    }
+    
+    this.ready = false;
 
     this.peerConnection.createAnswer(
       function(sessionDescription){
         self.setLocalDescription(
           sessionDescription,
-          onFailure
+          onSetLocalDescriptionSuccess,
+          function(e) {
+            self.ready = true;
+            onFailure(e);
+          }
         );
       },
       function(e) {
+        self.ready = true;
         self.logger.error('unable to create answer');
         self.logger.error(e);
-        onFailure();
-      }
+        onFailure(e);
+      },
+      constraints
     );
   },
 
-  setLocalDescription: function(sessionDescription, onFailure) {
+  setLocalDescription: function(sessionDescription, onSuccess, onFailure) {
     var self = this;
 
     this.peerConnection.setLocalDescription(
       sessionDescription,
-      function(){},
+      onSuccess,
       function(e) {
         self.logger.error('unable to set local description');
         self.logger.error(e);
-        onFailure();
+        onFailure(e);
       }
     );
   },
@@ -107,26 +135,40 @@ RTCMediaHandler.prototype = {
   * peerConnection creation.
   * @param {Function} onSuccess Fired when there are no more ICE candidates
   */
-  init: function(constraints) {
-    var idx, length, server, scheme, url,
+  init: function(options) {
+    options = options || {};
+    
+    var idx, length, server,
       self = this,
       servers = [],
+      constraints = options.constraints || {},
+      stun_servers = options.stun_servers  || null,
+      turn_servers = options.turn_servers || null,
       config = this.session.ua.configuration;
 
-    length = config.stun_servers.length;
-    for (idx = 0; idx < length; idx++) {
-      server = config.stun_servers[idx];
-      servers.push({'url': server});
+    if (!stun_servers) {
+      stun_servers = config.stun_servers;
     }
 
-    length = config.turn_servers.length;
+    if (!turn_servers) {
+      turn_servers = config.turn_servers;
+    }
+    
+    /* Change 'url' to 'urls' whenever this issue is solved:
+     * https://code.google.com/p/webrtc/issues/detail?id=2096
+     */
+    
+    if (stun_servers.length > 0) {
+      servers.push({'url': stun_servers});
+    }
+    
+    length = turn_servers.length;
     for (idx = 0; idx < length; idx++) {
-      server = config.turn_servers[idx];
-      url = server.server;
-      scheme = url.substr(0, url.indexOf(':'));
+      server = turn_servers[idx];
       servers.push({
-        'url': scheme + ':' + server.username + '@' + url.substr(scheme.length+1),
-        'credential': server.password
+        'url': server.urls,
+        'username': server.username,
+        'credential': server.credential
       });
     }
 
@@ -148,16 +190,18 @@ RTCMediaHandler.prototype = {
       }
     };
 
-    // To be deprecated as per https://code.google.com/p/webrtc/issues/detail?id=1393
-    this.peerConnection.ongatheringchange = function(e) {
-      if (e.currentTarget.iceGatheringState === 'complete' && this.iceConnectionState !== 'closed') {
-        self.onIceCompleted();
+    this.peerConnection.oniceconnectionstatechange = function() {
+      self.logger.log('ICE connection state changed to "'+ this.iceConnectionState +'"');
+      
+      if (this.iceConnectionState === 'disconnected') {
+        self.session.terminate({
+            cause: JsSIP.C.causes.RTP_TIMEOUT,
+            status_code: 200,
+            reason_phrase: JsSIP.C.causes.RTP_TIMEOUT
+          });
       }
     };
 
-    this.peerConnection.onicechange = function() {
-      self.logger.log('ICE connection state changed to "'+ this.iceConnectionState +'"');
-    };
 
     this.peerConnection.onstatechange = function() {
       self.logger.log('PeerConnection state changed to "'+ this.readyState +'"');

@@ -25,6 +25,9 @@ var Dialog,
 // RFC 3261 12.1
 Dialog = function(owner, message, type, state) {
   var contact;
+  
+  this.uac_pending_reply = false;
+  this.uas_pending_reply = false;
 
   if(!message.hasHeader('contact')) {
     return {
@@ -112,7 +115,7 @@ Dialog.prototype = {
   // RFC 3261 12.2.1.1
   createRequest: function(method, extraHeaders, body) {
     var cseq, request;
-    extraHeaders = extraHeaders || [];
+    extraHeaders = extraHeaders && extraHeaders.slice() || [];
 
     if(!this.local_seqnum) { this.local_seqnum = Math.floor(Math.random() * 10000); }
 
@@ -143,9 +146,11 @@ Dialog.prototype = {
 
   // RFC 3261 12.2.2
   checkInDialogRequest: function(request) {
+    var self = this;
+    
     if(!this.remote_seqnum) {
       this.remote_seqnum = request.cseq;
-    } else if(request.method !== JsSIP.C.INVITE && request.cseq < this.remote_seqnum) {
+    } else if(request.cseq < this.remote_seqnum) {
         //Do not try to reply to an ACK request.
         if (request.method !== JsSIP.C.ACK) {
           request.reply(500);
@@ -158,29 +163,46 @@ Dialog.prototype = {
     switch(request.method) {
       // RFC3261 14.2 Modifying an Existing Session -UAS BEHAVIOR-
       case JsSIP.C.INVITE:
-        if(request.cseq < this.remote_seqnum) {
-          if(this.state === C.STATUS_EARLY) {
-            var retryAfter = (Math.random() * 10 | 0) + 1;
-            request.reply(500, null, ['Retry-After:'+ retryAfter]);
-          } else {
-            request.reply(500);
-          }
-          return false;
-        }
-        // RFC3261 14.2
-        if(this.state === C.STATUS_EARLY) {
+        if (this.uac_pending_reply === true) {
           request.reply(491);
+        } else if (this.uas_pending_reply === true) {
+          var retryAfter = (Math.random() * 10 | 0) + 1;
+          request.reply(500, null, ['Retry-After:'+ retryAfter]);
           return false;
+        } else {
+          this.uas_pending_reply = true;
+          request.server_transaction.on('stateChanged', function stateChanged(e){
+            if (e.sender.state === JsSIP.Transactions.C.STATUS_ACCEPTED ||
+                e.sender.state === JsSIP.Transactions.C.STATUS_COMPLETED ||
+                e.sender.state === JsSIP.Transactions.C.STATUS_TERMINATED) {
+                
+              request.server_transaction.removeListener('stateChanged', stateChanged);
+              self.uas_pending_reply = false;
+              
+              if (self.uac_pending_reply === false) {
+                self.owner.onReadyToReinvite();
+              }
+            }
+          });
         }
-        // RFC3261 12.2.2 Replace the dialog`s remote target URI
+        
+        // RFC3261 12.2.2 Replace the dialog`s remote target URI if the request is accepted
         if(request.hasHeader('contact')) {
-          this.remote_target = request.parseHeader('contact').uri;
+          request.server_transaction.on('stateChanged', function(e){
+            if (e.sender.state === JsSIP.Transactions.C.STATUS_ACCEPTED) {
+              self.remote_target = request.parseHeader('contact').uri;
+            }
+          });
         }
         break;
       case JsSIP.C.NOTIFY:
-        // RFC6655 3.2 Replace the dialog`s remote target URI
+        // RFC6665 3.2 Replace the dialog`s remote target URI if the request is accepted
         if(request.hasHeader('contact')) {
-          this.remote_target = request.parseHeader('contact').uri;
+          request.server_transaction.on('stateChanged', function(e){
+            if (e.sender.state === JsSIP.Transactions.C.STATUS_COMPLETED) {
+              self.remote_target = request.parseHeader('contact').uri;
+            }
+          });
         }
         break;
     }
@@ -192,7 +214,7 @@ Dialog.prototype = {
     options = options || {};
 
     var
-      extraHeaders = options.extraHeaders || [],
+      extraHeaders = options.extraHeaders && options.extraHeaders.slice() || [],
       body = options.body || null,
       request = this.createRequest(method, extraHeaders, body),
       request_sender = new RequestSender(this, applicant, request);

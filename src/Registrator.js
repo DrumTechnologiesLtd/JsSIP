@@ -39,6 +39,8 @@ Registrator = function(ua, transport) {
 
   // Contact header
   this.contact = this.ua.contact.toString();
+  
+  this.extraHeaders = [];
 
   if(reg_id) {
     this.contact += ';reg-id='+ reg_id;
@@ -55,9 +57,13 @@ Registrator.prototype = {
       self = this;
 
     options = options || {};
-    extraHeaders = options.extraHeaders || [];
+    
+    if (options.extraHeaders && Object.keys(options.extraHeaders).length !== 0) {
+      this.extraHeaders = options.extraHeaders && options.extraHeaders.slice();
+    }
+    
+    extraHeaders = this.extraHeaders.slice();
     extraHeaders.push('Contact: '+ this.contact + ';expires=' + this.expires);
-    extraHeaders.push('Allow: '+ JsSIP.Utils.getAllowedMethods(this.ua));
 
     this.request = new JsSIP.OutgoingRequest(JsSIP.C.REGISTER, this.registrar, this.ua, {
         'to_uri': this.to_uri,
@@ -186,7 +192,12 @@ Registrator.prototype = {
     }
 
     options = options || {};
-    extraHeaders = options.extraHeaders || [];
+    
+    if (options.extraHeaders && Object.keys(options.extraHeaders).length !== 0) {
+      this.extraHeaders = options.extraHeaders && options.extraHeaders.slice();
+    }
+    
+    extraHeaders = this.extraHeaders.slice();
 
     this.registered = false;
 

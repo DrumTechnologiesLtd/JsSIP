@@ -36,11 +36,12 @@ OutgoingRequest = function(method, ruri, ua, params, extraHeaders, body) {
   }
 
   this.logger = ua.getLogger('jssip.sipmessage');
+  this.ua = ua;
   this.headers = {};
   this.method = method;
   this.ruri = ruri;
   this.body = body;
-  this.extraHeaders = extraHeaders || [];
+  this.extraHeaders = extraHeaders && extraHeaders.slice() || [];
 
   // Fill the Common SIP Request Headers
 
@@ -98,8 +99,89 @@ OutgoingRequest.prototype = {
   setHeader: function(name, value) {
     this.headers[JsSIP.Utils.headerize(name)] = (value instanceof Array) ? value : [value];
   },
+  
+  /**
+   * Get the value of the given header name at the given position.
+   * @param {String} name header name
+   * @returns {String|undefined} Returns the specified header, null if header doesn't exist.
+   */
+  getHeader: function(name) {
+    var regexp, idx,
+      length = this.extraHeaders.length,
+      header = this.headers[JsSIP.Utils.headerize(name)];
+
+    if(header) {
+      if(header[0]) {
+        return header[0];
+      }
+    } else {
+      regexp = new RegExp('^\\s*'+ name +'\\s*:','i');
+      for (idx=0; idx<length; idx++) {
+        header = this.extraHeaders[idx];
+        if (regexp.test(header)) {
+          return header.substring(header.indexOf(':')+1).trim();
+        }
+      }
+    }
+    
+    return;
+  },
+
+  /**
+   * Get the header/s of the given name.
+   * @param {String} name header name
+   * @returns {Array} Array with all the headers of the specified name.
+   */
+  getHeaders: function(name) {
+    var idx, length, regexp,
+      header = this.headers[JsSIP.Utils.headerize(name)],
+      result = [];
+
+    if (header) {
+      length = header.length;
+      for (idx = 0; idx < length; idx++) {
+        result.push(header[idx]);
+      }
+      return result;
+    } else {
+      length = this.extraHeaders.length;
+      regexp = new RegExp('^\\s*'+ name +'\\s*:','i');
+      for (idx=0; idx<length; idx++) {
+        header = this.extraHeaders[idx];
+        if (regexp.test(header)) {
+          result.push(header.substring(header.indexOf(':')+1).trim());
+        }
+      }
+      return result;
+    }
+  },
+
+  /**
+   * Verify the existence of the given header.
+   * @param {String} name header name
+   * @returns {boolean} true if header with given name exists, false otherwise
+   */
+  hasHeader: function(name) {
+    var regexp, idx,
+      length = this.extraHeaders.length;
+    
+    if (this.headers[JsSIP.Utils.headerize(name)]) {
+      return true;
+    } else {
+      regexp = new RegExp('^\\s*'+ name +'\\s*:','i');
+      for (idx=0; idx<length; idx++) {
+        if (regexp.test(this.extraHeaders[idx])) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  },
+  
   toString: function() {
-    var msg = '', header, length, idx;
+    var msg = '', header, length, idx, 
+      supported = [];
 
     msg += this.method + ' ' + this.ruri + ' SIP/2.0\r\n';
 
@@ -112,10 +194,27 @@ OutgoingRequest.prototype = {
 
     length = this.extraHeaders.length;
     for (idx = 0; idx < length; idx++) {
-      msg += this.extraHeaders[idx] +'\r\n';
+      msg += this.extraHeaders[idx].trim() +'\r\n';
     }
 
-    msg += 'Supported: ' +  JsSIP.UA.C.SUPPORTED +'\r\n';
+    // Supported
+    switch (this.method) {
+      case JsSIP.C.REGISTER:
+        supported.push('path', 'gruu');
+        break;
+      case JsSIP.C.INVITE:
+        if (this.ua.contact.pub_gruu || this.ua.contact.temp_gruu) {
+          supported.push('gruu');
+        }
+        break;
+    }
+    
+    supported.push('outbound');
+    
+    // Allow
+    msg += 'Allow: '+ JsSIP.Utils.getAllowedMethods(this.ua) +'\r\n';
+    
+    msg += 'Supported: ' +  supported +'\r\n';
     msg += 'User-Agent: ' + JsSIP.C.USER_AGENT +'\r\n';
 
     if(this.body) {
@@ -291,6 +390,7 @@ IncomingMessage.prototype = {
  */
 IncomingRequest = function(ua) {
   this.logger = ua.getLogger('jssip.sipmessage');
+  this.ua = ua;
   this.headers = {};
   this.ruri = null;
   this.transport = null;
@@ -309,6 +409,7 @@ IncomingRequest.prototype = new IncomingMessage();
 */
 IncomingRequest.prototype.reply = function(code, reason, extraHeaders, body, onSuccess, onFailure) {
   var rr, vias, length, idx, response,
+    supported = [],
     to = this.getHeader('To'),
     r = 0,
     v = 0;
@@ -324,7 +425,7 @@ IncomingRequest.prototype.reply = function(code, reason, extraHeaders, body, onS
   }
 
   reason = reason || JsSIP.C.REASON_PHRASE[code] || '';
-  extraHeaders = extraHeaders || [];
+  extraHeaders = extraHeaders && extraHeaders.slice() || [];
 
   response = 'SIP/2.0 ' + code + ' ' + reason + '\r\n';
 
@@ -357,8 +458,29 @@ IncomingRequest.prototype.reply = function(code, reason, extraHeaders, body, onS
 
   length = extraHeaders.length;
   for (idx = 0; idx < length; idx++) {
-    response += extraHeaders[idx] +'\r\n';
+    response += extraHeaders[idx].trim() +'\r\n';
   }
+  
+  // Supported
+  switch (this.method) {
+    case JsSIP.C.INVITE:
+      if (this.ua.contact.pub_gruu || this.ua.contact.temp_gruu) {
+        supported.push('gruu');
+      }
+      break;
+  }
+  
+  supported.push('outbound');
+  
+  // Allow and Accept
+  if (this.method === JsSIP.C.OPTIONS) {
+    response += 'Allow: '+ JsSIP.Utils.getAllowedMethods(this.ua) +'\r\n';
+    response += 'Accept: '+ JsSIP.UA.C.ACCEPTED_BODY_TYPES +'\r\n';
+  } else if (code === 405) {
+    response += 'Allow: '+ JsSIP.Utils.getAllowedMethods(this.ua) +'\r\n';
+  }
+  
+  response += 'Supported: ' +  supported +'\r\n';
 
   if(body) {
     length = JsSIP.Utils.str_utf8_length(body);

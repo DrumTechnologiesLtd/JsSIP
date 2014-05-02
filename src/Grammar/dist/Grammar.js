@@ -3054,7 +3054,6 @@ JsSIP.Grammar = (function(){
         var result0;
         var pos0;
         
-        pos0 = pos;
         if (input.substr(pos, 3).toLowerCase() === "sip") {
           result0 = input.substr(pos, 3);
           pos += 3;
@@ -3064,12 +3063,24 @@ JsSIP.Grammar = (function(){
             matchFailed("\"sip\"");
           }
         }
-        if (result0 !== null) {
-          result0 = (function(offset, uri_scheme) {
-                            data.scheme = uri_scheme.toLowerCase(); })(pos0, result0);
-        }
         if (result0 === null) {
-          pos = pos0;
+          pos0 = pos;
+          if (input.substr(pos, 4).toLowerCase() === "sips") {
+            result0 = input.substr(pos, 4);
+            pos += 4;
+          } else {
+            result0 = null;
+            if (reportFailures === 0) {
+              matchFailed("\"sips\"");
+            }
+          }
+          if (result0 !== null) {
+            result0 = (function(offset) {
+                              data.scheme = uri_scheme.toLowerCase(); })(pos0);
+          }
+          if (result0 === null) {
+            pos = pos0;
+          }
         }
         return result0;
       }
@@ -3444,11 +3455,11 @@ JsSIP.Grammar = (function(){
         var pos0;
         
         pos0 = pos;
-        result0 = parse_hostname();
+        result0 = parse_IPv4address();
         if (result0 === null) {
-          result0 = parse_IPv4address();
+          result0 = parse_IPv6reference();
           if (result0 === null) {
-            result0 = parse_IPv6reference();
+            result0 = parse_hostname();
           }
         }
         if (result0 !== null) {
@@ -3589,26 +3600,26 @@ JsSIP.Grammar = (function(){
       function parse_toplabel() {
         var result0, result1;
         
-        if (/^[a-zA-Z_\-]/.test(input.charAt(pos))) {
+        if (/^[a-zA-Z0-9_\-]/.test(input.charAt(pos))) {
           result1 = input.charAt(pos);
           pos++;
         } else {
           result1 = null;
           if (reportFailures === 0) {
-            matchFailed("[a-zA-Z_\\-]");
+            matchFailed("[a-zA-Z0-9_\\-]");
           }
         }
         if (result1 !== null) {
           result0 = [];
           while (result1 !== null) {
             result0.push(result1);
-            if (/^[a-zA-Z_\-]/.test(input.charAt(pos))) {
+            if (/^[a-zA-Z0-9_\-]/.test(input.charAt(pos))) {
               result1 = input.charAt(pos);
               pos++;
             } else {
               result1 = null;
               if (reportFailures === 0) {
-                matchFailed("[a-zA-Z_\\-]");
+                matchFailed("[a-zA-Z0-9_\\-]");
               }
             }
           }
@@ -11482,11 +11493,11 @@ JsSIP.Grammar = (function(){
         var pos0;
         
         pos0 = pos;
-        result0 = parse_hostname();
+        result0 = parse_IPv4address();
         if (result0 === null) {
-          result0 = parse_IPv4address();
+          result0 = parse_IPv6reference();
           if (result0 === null) {
-            result0 = parse_IPv6reference();
+            result0 = parse_hostname();
           }
         }
         if (result0 !== null) {
