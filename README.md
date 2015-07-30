@@ -1,15 +1,16 @@
-<a href="http://jssip.net"><img src="http://jssip.net/images/jssip-banner.png"/></a>
+<p align="center"><a href="http://jssip.net"><img src="http://jssip.net/images/jssip-banner-new.png"/></a></p>
 
-[![Build Status](https://travis-ci.org/versatica/JsSIP.png?branch=master)](https://travis-ci.org/versatica/JsSIP)
+[![Build Status](https://travis-ci.org/versatica/JsSIP.png?branch=new-design)](https://travis-ci.org/versatica/JsSIP)
 
 ## Overview
 
+* Runs in the browser and Node.js.
 * SIP over [WebSocket](http://jssip.net/documentation/misc/sip_websocket/) (use real SIP in your web apps)
-* Audio/video calls ([WebRTC](http://jssip.net/documentation/misc/webrtc)), instant messaging and presence
-* Lightweight! (~140KB)
+* Audio/video calls ([WebRTC](http://jssip.net/documentation/misc/webrtc)) and instant messaging
+* Lightweight!
 * Easy to use and powerful user API
-* Works with OverSIP, Kamailio, Asterisk and repro (reSIProcate) servers ([more info](http://jssip.net/documentation/misc/interoperability))
-* Written by the authors of [draft-ietf-sipcore-sip-websocket](http://tools.ietf.org/html/draft-ietf-sipcore-sip-websocket) and [OverSIP](http://www.oversip.net)
+* Works with OverSIP, Kamailio, Asterisk. Mobicents and repro (reSIProcate) servers ([more info](http://jssip.net/documentation/misc/interoperability))
+* Written by the authors of [RFC 7118 "The WebSocket Protocol as a Transport for SIP"](http://tools.ietf.org/html/rfc7118) and [OverSIP](http://oversip.net)
 
 
 ## Getting Started
@@ -25,12 +26,13 @@ var configuration = {
   'password': 'superpassword'
 };
 
-var coolPhone = new JsSIP.UA(configuration);
+var ua = new JsSIP.UA(configuration);
 
-coolPhone.start();
+ua.start();
 
 
 // Make an audio/video call:
+var session = null;
 
 // HTML5 <video> elements in which local and remote video will be shown
 var selfView =   document.getElementById('my-video');
@@ -47,20 +49,21 @@ var eventHandlers = {
   'ended': function(e){
     console.log('call ended with cause: '+ e.data.cause);
   },
-  'started': function(e){
-    var rtcSession = e.sender;
+  'confirmed': function(e){
+    var local_stream = session.connection.getLocalStreams()[0];
 
-    console.log('call started');
+    console.log('call confirmed');
 
     // Attach local stream to selfView
-    if (rtcSession.getLocalStreams().length > 0) {
-      selfView.src = window.URL.createObjectURL(rtcSession.getLocalStreams()[0]);
-    }
+    selfView = JsSIP.rtcninja.attachMediaStream(selfView, local_stream);
+  },
+  'addstream': function(e){
+    var stream = e.stream;
+
+    console.log('remote stream added');
 
     // Attach remote stream to remoteView
-    if (rtcSession.getRemoteStreams().length > 0) {
-      remoteView.src = window.URL.createObjectURL(rtcSession.getRemoteStreams()[0]);
-    }
+    remoteView = JsSIP.rtcninja.attachMediaStream(remoteView, stream);
   }
 };
 
@@ -70,10 +73,10 @@ var options = {
 };
 
 
-coolPhone.call('sip:bob@example.com', options);
+session = ua.call('sip:bob@example.com', options);
 ```
 
-Want to see more? Check the full [Getting Started](http://jssip.net/documentation/0.3.x/getting_started/) section in the project website.
+Want to see more? Check the full documentation at http://jssip.net/documentation/.
 
 
 ## Online Demo
@@ -90,22 +93,24 @@ Check our **Tryit JsSIP** online demo:
 
 ## Download
 
-* [jssip.net/download](http://jssip.net/download/)
+* As Node module: `$ npm install jssip`
+* As Bower module: `$ bower install jssip`
+* Manually: [jssip.net/download](http://jssip.net/download/)
 
 
 ## Authors
 
-### José Luis Millán
+#### José Luis Millán
 
 * Main author. Core Designer and Developer.
 * <jmillan@aliax.net> (Github [@jmillan](https://github.com/jmillan))
 
-### Iñaki Baz Castillo
+#### Iñaki Baz Castillo
 
 * Core Designer and Developer.
 * <ibc@aliax.net> (Github [@ibc](https://github.com/ibc))
 
-### Saúl Ibarra Corretgé
+#### Saúl Ibarra Corretgé
 
 * Core Designer.
 * <saghul@gmail.com> (Github [@saghul](https://github.com/saghul))

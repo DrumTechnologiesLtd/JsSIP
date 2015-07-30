@@ -1,9 +1,15 @@
-# Doc: http://manuel.manuelles.nl/blog/2012/06/22/integrate-travis-ci-into-grunt/
-
 language: node_js
 
 node_js:
-  - 0.8
+  - 0.10
+
+before_install:
+  - npm install -g npm@latest
+  - npm install -g git+https://github.com/gulpjs/gulp.git#4.0
+
+install: npm install
+
+before_script: gulp devel dist
 
 notifications:
   email:

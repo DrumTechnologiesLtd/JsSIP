@@ -1,6 +1,309 @@
 CHANGELOG
 =========
 
+Version 0.7.3 (released in 2015-07-29)
+---------------------------------------
+
+* FIX properly restart UA if start() is called while closing.
+
+
+Version 0.7.2 (released in 2015-07-27)
+---------------------------------------
+
+* Update dependencies.
+
+
+Version 0.7.1 (released in 2015-07-27)
+---------------------------------------
+
+* Update dependencies.
+
+
+Version 0.7.0 (released in 2015-07-23)
+---------------------------------------
+
+* Add REFER support.
+
+
+Version 0.6.33 (released in 2015-06-17)
+---------------------------------------
+
+* Don't keep URI params&headers in the registrar server URI.
+* `RTCSession` emits `peerconnection` for outgoing calls once the `RTCPeerConnection` is created and before the SDP offer is generated (good chance to create a `RTCDataChannel` without requiring renegotiation).
+
+
+Version 0.6.32 (released in 2015-06-16)
+---------------------------------------
+
+* Add callback to `update` and `reinvite` events.
+
+
+Version 0.6.31 (released in 2015-06-16)
+---------------------------------------
+
+* Added a parser for Reason header.
+
+
+Version 0.6.30 (released in 2015-06-09)
+---------------------------------------
+
+* Fix array iteration in `URI#toString()` to avoid Array prototype mangling by devil libraries such as Ember.
+
+
+Version 0.6.29 (released in 2015-06-06)
+---------------------------------------
+
+* Auto-register on transport connection before emitting the event.
+
+
+Version 0.6.28 (released in 2015-06-02)
+---------------------------------------
+
+* Update "rtcninja" dependencie.
+
+
+Version 0.6.27 (released in 2015-06-02)
+---------------------------------------
+
+* Don't terminate SIP dialog if processing of 183 with SDP fails.
+* Update dependencies.
+
+
+Version 0.6.26 (released in 2015-04-17)
+---------------------------------------
+
+* Update "rtcninja" dependency.
+
+
+Version 0.6.25 (released in 2015-04-16)
+---------------------------------------
+
+* Update "rtcninja" dependency.
+
+
+Version 0.6.24 (released in 2015-04-14)
+---------------------------------------
+
+* RTCSession: Fix Invite Server transaction destruction.
+
+
+Version 0.6.23 (released in 2015-04-14)
+---------------------------------------
+
+* RTCSession: Handle session timers before emitting "accepted".
+* Fix issue with latest version of browserify.
+
+
+Version 0.6.22 (released in 2015-04-13)
+---------------------------------------
+
+* Fix double "disconnected" event in some cases.
+
+
+Version 0.6.21 (released in 2015-03-11)
+---------------------------------------
+
+* Don't iterate arrays with (for...in) to avoid problems with evil JS libraries that add stuff into the Array prototype.
+
+
+Version 0.6.20 (released in 2015-03-09)
+---------------------------------------
+
+* Be more flexible receiving DTMF INFO bodies.
+
+
+Version 0.6.19 (released in 2015-03-05)
+---------------------------------------
+
+* Update dependencies.
+* 
+
+Version 0.6.18 (released in 2015-02-09)
+--------------------------------------
+
+* Terminate the call with a proper BYE/CANCEL/408/500 if request timeout, transport error or dialog error happens.
+* Fix "rtcninja" dependency problem.
+
+
+Version 0.6.17 (released in 2015-02-02)
+--------------------------------------
+
+* `RTCSession`: Improve `isReadyToReOffer()`.
+
+
+Version 0.6.16 (released in 2015-02-02)
+--------------------------------------
+
+* `RTCSession`: Avoid calling hold()/unhold/renegotiate() if an outgoing renegotiation is not yet finished (return false).
+* `RTCSession`: Add `options` and `done` arguments to hold()/unhold/renegotiate().
+* `RTCSession`: New public method `isReadyToReOffer()`.
+
+
+Version 0.6.15 (released in 2015-01-31)
+--------------------------------------
+
+* `RTCSession:` Emit `iceconnetionstatechange` event.
+* Update "rtcninja" dependency to 0.4.0.
+
+
+Version 0.6.14 (released in 2015-01-29)
+--------------------------------------
+
+* `RTCSession:` Include initially given `rtcOfferConstraints` in `sendReinvite()` and `sendUpdate()`.
+
+
+Version 0.6.13 (released in 2015-01-29)
+--------------------------------------
+
+* Properly keep mute local audio/video if remote is on hold, and keep it even if we re-offer. Also fix SDP direction attributes in re-offers according to current local and remote "hold" status.
+
+
+Version 0.6.12 (released in 2015-01-28)
+--------------------------------------
+
+* Update "rtcninja" dependency to 0.3.3 (fix "RTCOfferOptions").
+
+
+Version 0.6.11 (released in 2015-01-27)
+--------------------------------------
+
+* Fix "Session-Expires" default value to 90 seconds.
+
+
+Version 0.6.10 (released in 2015-01-27)
+--------------------------------------
+
+* Update "rtcninja" dependency to 0.3.2 (get the `rtcninja.canRenegotiate` attribute).
+
+
+Version 0.6.9 (released in 2015-01-27)
+--------------------------------------
+
+* Don't reply 405 "Method Not Supported" to re-INVITE even if the UA's "newRTCSession" event is not set.
+* `RTCSession`: Allow extraHeaders in `renegotiate()`.
+
+Version 0.6.8 (released in 2015-01-26)
+--------------------------------------
+
+* `RTCSession`: Don't ask for `getUserMedia()` in outgoing calls if `mediaConstraints` is `{audio:false, video:false}`. It is user's responsability to, in that case, provide `offerToReceiveAudio/Video` in `rtcOfferConstraints`.
+
+
+Version 0.6.7 (released in 2015-01-26)
+--------------------------------------
+
+* ' UA.call()': Return the `RTCSession` instance.
+* ' UA.sendMessage()': Return the `Message` instance.
+
+
+Version 0.6.6 (released in 2015-01-24)
+--------------------------------------
+
+* `RTCSession`: Don't process SDPs in retranmissions of 200 OK during reINVITE/UDATE.
+* `RTCSession`: Emit 'reinvite' when a reINVITE is received.
+* `RTCSession`: Emit 'update' when an UPDATE is received.
+
+
+Version 0.6.5 (released in 2015-01-20)
+--------------------------------------
+
+* `RTCSession`: Don't override `this.data` on `answer()` (unless `options.data` is given).
+
+
+Version 0.6.4 (released in 2015-01-19)
+--------------------------------------
+
+* `RTCSession#connect()`: Add `rtcAnswerContraints` options for later incoming reINVITE or UPDATE with SDP offer.
+* `RTCSession#answer()`: Add `rtcOfferConstraints` options for later incoming reINVITE without SDP offer.
+* `RTCSession#renegotiate()`: Add `rtcOfferConstraints` options for the UPDATE or reINVITE.
+* `RTCSession#answer()`: Remove audio or video from the given `getUserMedia` mediaConstraints if the incoming SDP has no audio/video sections.
+
+
+Version 0.6.3 (released in 2015-01-17)
+--------------------------------------
+
+* Bug fix. Properly cancel when only '100 trying' has been received.
+
+
+Version 0.6.2 (released in 2015-01-16)
+--------------------------------------
+
+* Bug fix: Do not set "Content-Type: application/sdp" in body-less UPDATE requests.
+
+
+Version 0.6.1 (released in 2015-01-16)
+--------------------------------------
+
+* Support for [Session Timers](https://tools.ietf.org/html/rfc4028).
+
+
+Version 0.6.0 (released in 2015-01-13)
+--------------------------------------
+
+* [debug](https://github.com/visionmedia/debug) module.
+* [rtcninja](https://github.com/ibc/rtcninja.js) module.
+* Can renegotiate an ongoing session by means of a re-INVITE or UPDATE method (useful if the local stream attached to the `RTCPeerConnection` has been modified).
+* Improved hold/unhold detection.
+* New API options for `UA#call()` and `RTCSession#answer()`.
+
+
+Version 0.5.0 (released in 2014-11-03)
+--------------------------------------
+
+* JsSIP runs in Node!
+* The internal design of JsSIP has also been modified, becoming a real Node project in which the "browser version" (`jssip-0.5.0.js` or `jssip-0.5.0.min.js`) is generated with [browserify](http://browserify.org). This also means that the browser version can be loaded with AMD or CommonJS loaders.
+
+Version 0.4.3 (released in 2014-10-29)
+--------------------------------------
+
+* [(3b1ee11)](https://github.com/versatica/JsSIP/commit/3b1ee11) Fix references to 'this'.
+
+Version 0.4.2 (released in 2014-10-24)
+--------------------------------------
+
+* [(ca7702e)](https://github.com/versatica/JsSIP/commit/ca7702e) Fix #257. RTCMediaHandler: fire onIceCompleted() on next tick to avoid events race conditions in Firefox 33.
+
+Version 0.4.1 (released in 2014-10-21)
+--------------------------------------
+
+This version is included into the [Bower](http://bower.io/) registry which means `$ bower install jssip`.
+
+Version 0.4.0 (released in 2014-10-21)
+--------------------------------------
+
+* (http://jssip.net/documentation/0.4.x/api/session) Hold/Unhold implementation
+* (http://jssip.net/documentation/0.4.x/api/session) Mute/Unmute implementation
+* (http://jssip.net/documentation/0.4.x/api/ua_configuration_parameters/#instance_id) New 'instance_id' configuration parameter
+* (http://jssip.net/documentation/0.4.x/api/ua_configuration_parameters/#log) New 'log' configuration parameter
+* [(34b235c)](https://github.com/versatica/JsSIP/commit/34b235c) Fix #246. Increase the event emiter max listener number to 50
+* [(9a1ebdf)](https://github.com/versatica/JsSIP/commit/9a1ebdf) Late SDP implementation. Handle SDP-less incoming INVITEs
+* [(f0cc4c1)](https://github.com/versatica/JsSIP/commit/f0cc4c1) Fix #253. RTCSession: instead of "started" emit "accepted" when 2XX and "confirmed" when ACK
+* [(f0cc4c1)](https://github.com/versatica/JsSIP/commit/f0cc4c1) Fix #253. RTCSession: accept SDP renegotiation on incoming UPDATE requests.
+* [(177f38d)](https://github.com/versatica/JsSIP/commit/177f38d) Fix #248. Improve transaction handling on CANCEL
+* [(f9ef522)](https://github.com/versatica/JsSIP/commit/f9ef522) Fix detection of incoming merged requests (don't generate 482 for retransmissions).
+* [(3789d5b)](https://github.com/versatica/JsSIP/commit/3789d5b) Fix #245. Improve late CANCEL
+* [(2274a7d)](https://github.com/versatica/JsSIP/commit/2274a7d) Add hack_via_ws option to force "WS" in Via header when the server has wss:// scheme.
+* [(c9e8764)](https://github.com/versatica/JsSIP/commit/c9e8764) Fire 'progress' (originator = local) when receiving an incoming call.
+* [(39949e0)](https://github.com/versatica/JsSIP/commit/39949e0) Fix #242. fine tune the ICE state check for createAnswer/createOffer
+* [(80c32f3)](https://github.com/versatica/JsSIP/commit/80c32f3) Fix #240. ICE connection RTP timeout status fix
+* [(1f4d36d)](https://github.com/versatica/JsSIP/commit/1f4d36d) Remove RFC 3261 18.1.2 sanity check (sent-by host mismatch in Via header).
+* [(62e8323)](https://github.com/versatica/JsSIP/commit/62e8323) Fix #176. Update to the latest IceServer definition
+* [(caf20f9)](https://github.com/versatica/JsSIP/commit/caf20f9) Fix #163. Stop transport revocery on UA.stop().
+* [(2f3769b)](https://github.com/versatica/JsSIP/commit/2f3769b) Fix #148: WebSocket reconnection behaviour
+* [(d7c3c9c)](https://github.com/versatica/JsSIP/commit/d7c3c9c) Use plain 'for' loops instead of 'for in' loops on arrays
+* [(a327be3)](https://github.com/versatica/JsSIP/commit/a327be3) Fix. INFO-based DTMF fixes
+* [(d141864)](https://github.com/versatica/JsSIP/commit/d141864) Fix #133. Incorrect REGISTER Contact header value  after transport disconnection
+* [(f4a29e9)](https://github.com/versatica/JsSIP/commit/f4a29e9) Improvements to 2xx retransmission behaviour
+* [(3fc4efa)](https://github.com/versatica/JsSIP/commit/3fc4efa) Fix #107. Stop spamming provisional responses
+* [(7c2abe0)](https://github.com/versatica/JsSIP/commit/7c2abe0) Fix. Permit receiving a 200 OK to a INVITE before any 1XX provisional
+* [(5c644a6)](https://github.com/versatica/JsSIP/commit/5c644a6) Improvements to min-expires fix
+* [(4bfc34c)](https://github.com/versatica/JsSIP/commit/4bfc34c) Fix handling of 423 response to REGISTER
+* [(3e84eaf)](https://github.com/versatica/JsSIP/commit/3e84eaf) Fix #112. Enhance CANCEL request processing
+* [(1740e5e)](https://github.com/versatica/JsSIP/commit/1740e5e) Fix #117. Clear registration timer before re-setting it
+* [(dad84a1)](https://github.com/versatica/JsSIP/commit/dad84a1) Fix #111. Create confirmed dialog before setting remote description.
+* [(15d83bb)](https://github.com/versatica/JsSIP/commit/15d83bb) Fix #100. 'originator' property was missing in RTCSession 'started' event data object. Thanks @gavllew
+* [(b5c08dc)](https://github.com/versatica/JsSIP/commit/b5c08dc) Fix #99. Do not close the RTCSession if it has been accepted and the WS disconnects
+* [(46eef46)](https://github.com/versatica/JsSIP/commit/46eef46) Fix #90. Don't log password
+* [(9ca4bc9)](https://github.com/versatica/JsSIP/commit/9ca4bc9) Fix #89. Do not send a To tag in '100 Trying' responses
 
 Version 0.3.0 (released in 2013-03-18)
 -------------------------------
@@ -63,7 +366,7 @@ Version 0.3.0 (released in 2013-03-18)
 * [(da23790)](https://github.com/versatica/JsSIP/commit/da23790) Fix 'UTF8-NONASCII' grammar rule
 * [(3f86b94)](https://github.com/versatica/JsSIP/commit/3f86b94) Require a single grunt task for packaging
 * [(81595be)](https://github.com/versatica/JsSIP/commit/81595be) Add some log lines into sanity check code for clarity
-* [(a8a7627)](https://github.com/versatica/JsSIP/commit/a8a7627) Enhance RTCPeerconnection SDP error handling. Thanks @ibc for reporting.
+* [(a8a7627)](https://github.com/versatica/JsSIP/commit/a8a7627) Enhance RTCPeerConnection SDP error handling. Thanks @ibc for reporting.
 * [(3acc474)](https://github.com/versatica/JsSIP/commit/3acc474) Add turn configuration parameters for RTCPeerConnection
 * [(9fccaf5)](https://github.com/versatica/JsSIP/commit/9fccaf5) Enhance 'boolean' comparison
 * [(24fcdbb)](https://github.com/versatica/JsSIP/commit/24fcdbb) Make preloaded Route header optional.
