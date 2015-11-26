@@ -1,5 +1,5 @@
 /*
- * JsSIP v0.7.3
+ * JsSIP v0.7.9
  * the Javascript SIP library
  * Copyright: 2012-2015 José Luis Millán <jmillan@aliax.net> (https://github.com/jmillan)
  * Homepage: http://jssip.net
@@ -161,7 +161,7 @@ var C = {
 
 module.exports = C;
 
-},{"../package.json":51}],2:[function(require,module,exports){
+},{"../package.json":48}],2:[function(require,module,exports){
 module.exports = Dialog;
 
 
@@ -13342,7 +13342,7 @@ Object.defineProperties(JsSIP, {
   }
 });
 
-},{"../package.json":51,"./Constants":1,"./Exceptions":5,"./Grammar":6,"./NameAddrHeader":9,"./UA":22,"./URI":23,"./Utils":24,"debug":31,"rtcninja":36}],8:[function(require,module,exports){
+},{"../package.json":48,"./Constants":1,"./Exceptions":5,"./Grammar":6,"./NameAddrHeader":9,"./UA":22,"./URI":23,"./Utils":24,"debug":31,"rtcninja":36}],8:[function(require,module,exports){
 module.exports = Message;
 
 
@@ -13682,7 +13682,6 @@ module.exports = Parser;
  */
 var debugerror = require('debug')('JsSIP:ERROR:Parser');
 debugerror.log = console.warn.bind(console);
-var sdp_transform = require('sdp-transform');
 var Grammar = require('./Grammar');
 var SIPMessage = require('./SIPMessage');
 
@@ -13954,17 +13953,7 @@ Parser.parseMessage = function(data, ua) {
   return message;
 };
 
-
-/**
- * sdp-transform features.
- */
-Parser.parseSDP = sdp_transform.parse;
-Parser.writeSDP = sdp_transform.write;
-Parser.parseFmtpConfig = sdp_transform.parseFmtpConfig;
-Parser.parsePayloads = sdp_transform.parsePayloads;
-Parser.parseRemoteCandidates = sdp_transform.parseRemoteCandidates;
-
-},{"./Grammar":6,"./SIPMessage":18,"debug":31,"sdp-transform":45}],11:[function(require,module,exports){
+},{"./Grammar":6,"./SIPMessage":18,"debug":31}],11:[function(require,module,exports){
 module.exports = RTCSession;
 
 
@@ -13997,10 +13986,10 @@ var debug = require('debug')('JsSIP:RTCSession');
 var debugerror = require('debug')('JsSIP:ERROR:RTCSession');
 debugerror.log = console.warn.bind(console);
 var rtcninja = require('rtcninja');
+var sdp_transform = require('sdp-transform');
 var JsSIP_C = require('./Constants');
 var Exceptions = require('./Exceptions');
 var Transactions = require('./Transactions');
-var Parser = require('./Parser');
 var Utils = require('./Utils');
 var Timers = require('./Timers');
 var SIPMessage = require('./SIPMessage');
@@ -14438,7 +14427,7 @@ RTCSession.prototype.answer = function(options) {
   extraHeaders.unshift('Contact: ' + self.contact);
 
   // Determine incoming media from incoming SDP offer (if any).
-  sdp = Parser.parseSDP(request.body || '');
+  sdp = request.parseSDP();
 
   // Make sure sdp.media is an array, not the case if there is only one media
   if (! Array.isArray(sdp.media)) {
@@ -14505,15 +14494,20 @@ RTCSession.prototype.answer = function(options) {
   // TODO: This may throw an error, should react.
   createRTCConnection.call(this, pcConfig, rtcConstraints);
 
+  // If a local MediaStream is given use it.
   if (mediaStream) {
     userMediaSucceeded(mediaStream);
-  } else {
+  // If at least audio or video is requested prompt getUserMedia.
+  } else if (mediaConstraints.audio || mediaConstraints.video) {
     self.localMediaStreamLocallyGenerated = true;
     rtcninja.getUserMedia(
       mediaConstraints,
       userMediaSucceeded,
       userMediaFailed
     );
+  // Otherwise don't prompt getUserMedia.
+  } else {
+    userMediaSucceeded(null);
   }
 
   // User media succeeded
@@ -14521,7 +14515,9 @@ RTCSession.prototype.answer = function(options) {
     if (self.status === C.STATUS_TERMINATED) { return; }
 
     self.localMediaStream = stream;
-    self.connection.addStream(stream);
+    if (stream) {
+      self.connection.addStream(stream);
+    }
 
     if (! self.late_sdp) {
       self.connection.setRemoteDescription(
@@ -14557,14 +14553,14 @@ RTCSession.prototype.answer = function(options) {
     }
   }
 
-  function rtcSucceeded(sdp) {
+  function rtcSucceeded(desc) {
     if (self.status === C.STATUS_TERMINATED) { return; }
 
     // run for reply success callback
     function replySucceeded() {
       self.status = C.STATUS_WAITING_FOR_ACK;
 
-      setInvite2xxTimer.call(self, request, sdp);
+      setInvite2xxTimer.call(self, request, desc);
       setACKTimer.call(self);
       accepted.call(self, 'local');
     }
@@ -14577,7 +14573,7 @@ RTCSession.prototype.answer = function(options) {
     handleSessionTimersInIncomingRequest.call(self, request, extraHeaders);
 
     request.reply(200, null, extraHeaders,
-      sdp,
+      desc,
       replySucceeded,
       replyFailed
     );
@@ -15316,6 +15312,18 @@ RTCSession.prototype.newDTMF = function(data) {
 };
 
 
+RTCSession.prototype.resetLocalMedia = function() {
+  debug('resetLocalMedia()');
+
+  // Reset all but remoteHold.
+  this.localHold = false;
+  this.audioMuted = false;
+  this.videoMuted = false;
+
+  setLocalMediaStatus.call(this);
+};
+
+
 /**
  * Private API.
  */
@@ -15530,18 +15538,43 @@ function receiveReinvite(request) {
   debug('receiveReinvite()');
 
   var
-    sdp, idx, direction,
+    sdp, idx, direction, m,
     self = this,
     contentType = request.getHeader('Content-Type'),
-    m,
     hold = false,
+    rejected = false,
     data = {
       request: request,
-      callback: undefined
+      callback: undefined,
+      reject: reject.bind(this)
     };
+
+  function reject(options) {
+    options = options || {};
+    rejected = true;
+
+    var
+      status_code = options.status_code || 403,
+      reason_phrase = options.reason_phrase || '',
+      extraHeaders = options.extraHeaders && options.extraHeaders.slice() || [];
+
+    if (this.status !== C.STATUS_CONFIRMED) {
+      return false;
+    }
+
+    if (status_code < 300 || status_code >= 700) {
+      throw new TypeError('Invalid status_code: '+ status_code);
+    }
+
+    request.reply(status_code, reason_phrase, extraHeaders);
+  }
 
   // Emit 'reinvite'.
   this.emit('reinvite', data);
+
+  if (rejected) {
+    return;
+  }
 
   if (request.body) {
     this.late_sdp = false;
@@ -15551,7 +15584,7 @@ function receiveReinvite(request) {
       return;
     }
 
-    sdp = Parser.parseSDP(request.body);
+    sdp = request.parseSDP();
 
     for (idx=0; idx < sdp.media.length; idx++) {
       m = sdp.media[idx];
@@ -15642,18 +15675,43 @@ function receiveUpdate(request) {
   debug('receiveUpdate()');
 
   var
-    sdp, idx, direction,
+    sdp, idx, direction, m,
     self = this,
     contentType = request.getHeader('Content-Type'),
-    m,
+    rejected = false,
     hold = false,
     data = {
       request: request,
-      callback: undefined
+      callback: undefined,
+      reject: reject.bind(this)
     };
+
+  function reject(options) {
+    options = options || {};
+    rejected = true;
+
+    var
+      status_code = options.status_code || 403,
+      reason_phrase = options.reason_phrase || '',
+      extraHeaders = options.extraHeaders && options.extraHeaders.slice() || [];
+
+    if (this.status !== C.STATUS_CONFIRMED) {
+      return false;
+    }
+
+    if (status_code < 300 || status_code >= 700) {
+      throw new TypeError('Invalid status_code: '+ status_code);
+    }
+
+    request.reply(status_code, reason_phrase, extraHeaders);
+  }
 
   // Emit 'update'.
   this.emit('update', data);
+
+  if (rejected) {
+    return;
+  }
 
   if (! request.body) {
     var extraHeaders = [];
@@ -15668,7 +15726,7 @@ function receiveUpdate(request) {
     return;
   }
 
-  sdp = Parser.parseSDP(request.body);
+  sdp = request.parseSDP();
 
   for (idx=0; idx < sdp.media.length; idx++) {
     m = sdp.media[idx];
@@ -15873,7 +15931,10 @@ function sendInitialRequest(mediaConstraints, rtcOfferConstraints, mediaStream) 
 
   // If a local MediaStream is given use it.
   if (mediaStream) {
-    userMediaSucceeded(mediaStream);
+    // Wait a bit so the app can set events such as 'peerconnection' and 'connecting'.
+    setTimeout(function() {
+      userMediaSucceeded(mediaStream);
+    });
   // If at least audio or video is requested prompt getUserMedia.
   } else if (mediaConstraints.audio || mediaConstraints.video) {
     this.localMediaStreamLocallyGenerated = true;
@@ -15882,9 +15943,8 @@ function sendInitialRequest(mediaConstraints, rtcOfferConstraints, mediaStream) 
       userMediaSucceeded,
       userMediaFailed
     );
-  }
   // Otherwise don't prompt getUserMedia.
-  else {
+  } else {
     userMediaSucceeded(null);
   }
 
@@ -15914,11 +15974,18 @@ function sendInitialRequest(mediaConstraints, rtcOfferConstraints, mediaStream) 
     failed.call(self, 'local', null, JsSIP_C.causes.USER_DENIED_MEDIA_ACCESS);
   }
 
-  function rtcSucceeded(sdp) {
+  function rtcSucceeded(desc) {
     if (self.isCanceled || self.status === C.STATUS_TERMINATED) { return; }
 
-    self.request.body = sdp;
+    self.request.body = desc;
     self.status = C.STATUS_INVITE_SENT;
+
+    // Emit 'sending' so the app can mangle the body before the request
+    // is sent.
+    self.emit('sending', {
+      request: self.request
+    });
+
     request_sender.send();
   }
 
@@ -16351,7 +16418,7 @@ function mangleOffer(sdp) {
     return sdp;
   }
 
-  sdp = Parser.parseSDP(sdp);
+  sdp = sdp_transform.parse(sdp);
 
   // Local hold.
   if (this.localHold && ! this.remoteHold) {
@@ -16402,34 +16469,28 @@ function mangleOffer(sdp) {
     }
   }
 
-  return Parser.writeSDP(sdp);
+  return sdp_transform.write(sdp);
 }
 
 function setLocalMediaStatus() {
-  if (this.localHold) {
-    debug('setLocalMediaStatus() | me on hold, mutting my media');
-    toogleMuteAudio.call(this, true);
-    toogleMuteVideo.call(this, true);
-    return;
-  }
-  else if (this.remoteHold) {
-    debug('setLocalMediaStatus() | remote on hold, mutting my media');
-    toogleMuteAudio.call(this, true);
-    toogleMuteVideo.call(this, true);
-    return;
+  var enableAudio = true,
+    enableVideo = true;
+
+  if (this.localHold || this.remoteHold) {
+    enableAudio = false;
+    enableVideo = false;
   }
 
   if (this.audioMuted) {
-    toogleMuteAudio.call(this, true);
-  } else {
-    toogleMuteAudio.call(this, false);
+    enableAudio = false;
   }
 
   if (this.videoMuted) {
-    toogleMuteVideo.call(this, true);
-  } else {
-    toogleMuteVideo.call(this, false);
+    enableVideo = false;
   }
+
+  toogleMuteAudio.call(this, !enableAudio);
+  toogleMuteVideo.call(this, !enableVideo);
 }
 
 /**
@@ -16663,7 +16724,7 @@ function onunmute(options) {
   });
 }
 
-},{"./Constants":1,"./Dialog":2,"./Exceptions":5,"./Parser":10,"./RTCSession/DTMF":12,"./RTCSession/ReferNotifier":13,"./RTCSession/ReferSubscriber":14,"./RTCSession/Request":15,"./RequestSender":17,"./SIPMessage":18,"./Timers":19,"./Transactions":20,"./Utils":24,"debug":31,"events":26,"rtcninja":36,"util":30}],12:[function(require,module,exports){
+},{"./Constants":1,"./Dialog":2,"./Exceptions":5,"./RTCSession/DTMF":12,"./RTCSession/ReferNotifier":13,"./RTCSession/ReferSubscriber":14,"./RTCSession/Request":15,"./RequestSender":17,"./SIPMessage":18,"./Timers":19,"./Transactions":20,"./Utils":24,"debug":31,"events":26,"rtcninja":36,"sdp-transform":42,"util":30}],12:[function(require,module,exports){
 module.exports = DTMF;
 
 
@@ -17590,6 +17651,7 @@ module.exports = {
  * Dependencies.
  */
 var debug = require('debug')('JsSIP:SIPMessage');
+var sdp_transform = require('sdp-transform');
 var JsSIP_C = require('./Constants');
 var Utils = require('./Utils');
 var NameAddrHeader = require('./NameAddrHeader');
@@ -17681,6 +17743,16 @@ OutgoingRequest.prototype = {
    * -param {String | Array} value header value
    */
   setHeader: function(name, value) {
+    var regexp, idx;
+
+    // Remove the header from extraHeaders if present.
+    regexp = new RegExp('^\\s*'+ name +'\\s*:','i');
+    for (idx=0; idx<this.extraHeaders.length; idx++) {
+      if (regexp.test(this.extraHeaders[idx])) {
+        this.extraHeaders.splice(idx, 1);
+      }
+    }
+
     this.headers[Utils.headerize(name)] = (Array.isArray(value)) ? value : [value];
   },
 
@@ -17763,6 +17835,22 @@ OutgoingRequest.prototype = {
     return false;
   },
 
+  /**
+   * Parse the current body as a SDP and store the resulting object
+   * into this.sdp.
+   * -param {Boolean} force: Parse even if this.sdp already exists.
+   *
+   * Returns this.sdp.
+   */
+  parseSDP: function(force) {
+    if (!force && this.sdp) {
+      return this.sdp;
+    } else {
+      this.sdp = sdp_transform.parse(this.body || '');
+      return this.sdp;
+    }
+  },
+
   toString: function() {
     var msg = '', header, length, idx,
       supported = [];
@@ -17836,6 +17924,7 @@ function IncomingMessage(){
   this.to = null;
   this.to_tag = null;
   this.body = null;
+  this.sdp = null;
 }
 
 IncomingMessage.prototype = {
@@ -17959,6 +18048,22 @@ IncomingMessage.prototype = {
   setHeader: function(name, value) {
     var header = { raw: value };
     this.headers[Utils.headerize(name)] = [header];
+  },
+
+  /**
+   * Parse the current body as a SDP and store the resulting object
+   * into this.sdp.
+   * -param {Boolean} force: Parse even if this.sdp already exists.
+   *
+   * Returns this.sdp.
+   */
+  parseSDP: function(force) {
+    if (!force && this.sdp) {
+      return this.sdp;
+    } else {
+      this.sdp = sdp_transform.parse(this.body || '');
+      return this.sdp;
+    }
   },
 
   toString: function() {
@@ -18142,7 +18247,7 @@ function IncomingResponse() {
 
 IncomingResponse.prototype = new IncomingMessage();
 
-},{"./Constants":1,"./Grammar":6,"./NameAddrHeader":9,"./Utils":24,"debug":31}],19:[function(require,module,exports){
+},{"./Constants":1,"./Grammar":6,"./NameAddrHeader":9,"./Utils":24,"debug":31,"sdp-transform":42}],19:[function(require,module,exports){
 var T1 = 500,
   T2 = 4000,
   T4 = 5000;
@@ -18912,6 +19017,8 @@ Transport.C = C;
  * Dependencies.
  */
 var debug = require('debug')('JsSIP:Transport');
+var debugerror = require('debug')('JsSIP:ERROR:Transport');
+debugerror.log = console.warn.bind(console);
 var JsSIP_C = require('./Constants');
 var Parser = require('./Parser');
 var UA = require('./UA');
@@ -18964,7 +19071,15 @@ Transport.prototype = {
       (this.reconnection_attempts === 0)?1:this.reconnection_attempts);
 
     try {
-      this.ws = new W3CWebSocket(this.server.ws_uri, 'sip', this.node_websocket_options.origin, this.node_websocket_options.headers, this.node_websocket_options.requestOptions, this.node_websocket_options.clientConfig);
+      // Hack in case W3CWebSocket is not the class exported by Node-WebSocket
+      // (may just happen if the above `var W3CWebSocket` line is overriden by
+      // `var W3CWebSocket = global.W3CWebSocket`).
+      if (W3CWebSocket.length > 3) {
+        this.ws = new W3CWebSocket(this.server.ws_uri, 'sip', this.node_websocket_options.origin, this.node_websocket_options.headers, this.node_websocket_options.requestOptions, this.node_websocket_options.clientConfig);
+      } else {
+        this.ws = new W3CWebSocket(this.server.ws_uri, 'sip');
+      }
+
       this.ws.binaryType = 'arraybuffer';
 
       this.ws.onopen = function() {
@@ -18983,7 +19098,7 @@ Transport.prototype = {
         transport.onError(e);
       };
     } catch(e) {
-      debug('error connecting to WebSocket ' + this.server.ws_uri + ': ' + e);
+      debugerror('error connecting to WebSocket ' + this.server.ws_uri + ': ' + e);
       this.lastTransportError.code = null;
       this.lastTransportError.reason = e.message;
       this.ua.onTransportError(this);
@@ -19023,11 +19138,11 @@ Transport.prototype = {
     var message = msg.toString();
 
     if(this.ws && this.ws.readyState === this.ws.OPEN) {
-      debug('sending WebSocket message:\n\n' + message + '\n');
+      debug('sending WebSocket message:\n%s\n', message);
       this.ws.send(message);
       return true;
     } else {
-      debug('unable to send message, WebSocket is not open');
+      debugerror('unable to send message, WebSocket is not open');
       return false;
     }
   },
@@ -19060,7 +19175,7 @@ Transport.prototype = {
     debug('WebSocket disconnected (code: ' + e.code + (e.reason? '| reason: ' + e.reason : '') +')');
 
     if(e.wasClean === false) {
-      debug('WebSocket abrupt disconnection');
+      debugerror('WebSocket abrupt disconnection');
     }
     // Transport was connected
     if (connected_before === true) {
@@ -19092,16 +19207,16 @@ Transport.prototype = {
       try {
         data = String.fromCharCode.apply(null, new Uint8Array(data));
       } catch(evt) {
-        debug('received WebSocket binary message failed to be converted into string, message discarded');
+        debugerror('received WebSocket binary message failed to be converted into string, message discarded');
         return;
       }
 
-      debug('received WebSocket binary message:\n\n' + data + '\n');
+      debug('received WebSocket binary message:\n%s\n', data);
     }
 
     // WebSocket text message.
     else {
-      debug('received WebSocket text message:\n\n' + data + '\n');
+      debug('received WebSocket text message:\n%s\n', data);
     }
 
     message = Parser.parseMessage(data, this.ua);
@@ -19148,7 +19263,7 @@ Transport.prototype = {
   },
 
   onError: function(e) {
-    debug('WebSocket connection error: %o', e);
+    debugerror('WebSocket connection error: %o', e);
   },
 
   /**
@@ -19160,7 +19275,7 @@ Transport.prototype = {
     this.reconnection_attempts += 1;
 
     if(this.reconnection_attempts > this.ua.configuration.ws_server_max_reconnection) {
-      debug('maximum reconnection attempts for WebSocket ' + this.server.ws_uri);
+      debugerror('maximum reconnection attempts for WebSocket ' + this.server.ws_uri);
       this.ua.onTransportError(this);
     } else {
       debug('trying to reconnect to WebSocket ' + this.server.ws_uri + ' (reconnection attempt ' + this.reconnection_attempts + ')');
@@ -19173,7 +19288,7 @@ Transport.prototype = {
   }
 };
 
-},{"./Constants":1,"./Parser":10,"./SIPMessage":18,"./UA":22,"./sanityCheck":25,"debug":31,"websocket":48}],22:[function(require,module,exports){
+},{"./Constants":1,"./Parser":10,"./SIPMessage":18,"./UA":22,"./sanityCheck":25,"debug":31,"websocket":45}],22:[function(require,module,exports){
 module.exports = UA;
 
 
@@ -19201,6 +19316,8 @@ UA.C = C;
 var util = require('util');
 var events = require('events');
 var debug = require('debug')('JsSIP:UA');
+var debugerror = require('debug')('JsSIP:ERROR:UA');
+debugerror.log = console.warn.bind(console);
 var rtcninja = require('rtcninja');
 var JsSIP_C = require('./Constants');
 var Registrator = require('./Registrator');
@@ -19530,28 +19647,46 @@ UA.prototype.normalizeTarget = function(target) {
   return Utils.normalizeTarget(target, this.configuration.hostport_params);
 };
 
+/**
+ * Allow configuration changes in runtime.
+ * Returns true if the parameter could be set.
+ */
+UA.prototype.set = function(parameter, value) {
+  switch(parameter) {
+    case 'password':
+      this.configuration.password = String(value);
+      break;
+
+    default:
+      debugerror('set() | cannot set "%s" parameter in runtime', parameter);
+      return false;
+  }
+
+  return true;
+};
+
 
 //===============================
 //  Private (For internal use)
 //===============================
 
-UA.prototype.saveCredentials = function(credentials) {
-  this.cache.credentials[credentials.realm] = this.cache.credentials[credentials.realm] || {};
-  this.cache.credentials[credentials.realm][credentials.uri] = credentials;
-};
+// UA.prototype.saveCredentials = function(credentials) {
+//   this.cache.credentials[credentials.realm] = this.cache.credentials[credentials.realm] || {};
+//   this.cache.credentials[credentials.realm][credentials.uri] = credentials;
+// };
 
-UA.prototype.getCredentials = function(request) {
-  var realm, credentials;
+// UA.prototype.getCredentials = function(request) {
+//   var realm, credentials;
 
-  realm = request.ruri.host;
+//   realm = request.ruri.host;
 
-  if (this.cache.credentials[realm] && this.cache.credentials[realm][request.ruri]) {
-    credentials = this.cache.credentials[realm][request.ruri];
-    credentials.method = request.method;
-  }
+//   if (this.cache.credentials[realm] && this.cache.credentials[realm][request.ruri]) {
+//     credentials = this.cache.credentials[realm][request.ruri];
+//     credentials.method = request.method;
+//   }
 
-  return credentials;
-};
+//   return credentials;
+// };
 
 
 //==========================
@@ -20172,46 +20307,54 @@ UA.prototype.loadConfig = function(configuration) {
  * Configuration Object skeleton.
  */
 UA.configuration_skeleton = (function() {
-  var idx,  parameter,
-  skeleton = {},
-  parameters = [
-    // Internal parameters
-    'jssip_id',
-    'ws_server_max_reconnection',
-    'ws_server_reconnection_timeout',
-    'hostport_params',
+  var
+    idx, parameter, writable,
+    skeleton = {},
+    parameters = [
+      // Internal parameters
+      'jssip_id',
+      'ws_server_max_reconnection',
+      'ws_server_reconnection_timeout',
+      'hostport_params',
 
-    // Mandatory user configurable parameters
-    'uri',
-    'ws_servers',
+      // Mandatory user configurable parameters
+      'uri',
+      'ws_servers',
 
-    // Optional user configurable parameters
-    'authorization_user',
-    'connection_recovery_max_interval',
-    'connection_recovery_min_interval',
-    'display_name',
-    'hack_via_tcp', // false
-    'hack_via_ws', // false
-    'hack_ip_in_contact', //false
-    'instance_id',
-    'no_answer_timeout', // 30 seconds
-    'session_timers', // true
-    'node_websocket_options',
-    'password',
-    'register_expires', // 600 seconds
-    'registrar_server',
-    'use_preloaded_route',
+      // Optional user configurable parameters
+      'authorization_user',
+      'connection_recovery_max_interval',
+      'connection_recovery_min_interval',
+      'display_name',
+      'hack_via_tcp', // false
+      'hack_via_ws', // false
+      'hack_ip_in_contact', //false
+      'instance_id',
+      'no_answer_timeout', // 30 seconds
+      'session_timers', // true
+      'node_websocket_options',
+      'password',
+      'register_expires', // 600 seconds
+      'registrar_server',
+      'use_preloaded_route',
 
-    // Post-configuration generated parameters
-    'via_core_value',
-    'via_host'
-  ];
+      // Post-configuration generated parameters
+      'via_core_value',
+      'via_host'
+    ];
 
   for(idx in parameters) {
     parameter = parameters[idx];
+
+    if (['password'].indexOf(parameter) !== -1) {
+      writable = true;
+    } else {
+      writable = false;
+    }
+
     skeleton[parameter] = {
       value: '',
-      writable: false,
+      writable: writable,
       configurable: false
     };
   }
@@ -21638,7 +21781,9 @@ function drainQueue() {
         currentQueue = queue;
         queue = [];
         while (++queueIndex < len) {
-            currentQueue[queueIndex].run();
+            if (currentQueue) {
+                currentQueue[queueIndex].run();
+            }
         }
         queueIndex = -1;
         len = queue.length;
@@ -21690,7 +21835,6 @@ process.binding = function (name) {
     throw new Error('process.binding is not supported');
 };
 
-// TODO(shtylman)
 process.cwd = function () { return '/' };
 process.chdir = function (dir) {
     throw new Error('process.chdir is not supported');
@@ -22800,7 +22944,7 @@ module.exports = Adapter;
 
 // Dependencies
 
-var browser = require('bowser').browser,
+var browser = require('bowser'),
 	debug = require('debug')('rtcninja:Adapter'),
 	debugerror = require('debug')('rtcninja:ERROR:Adapter'),
 
@@ -22815,8 +22959,7 @@ var browser = require('bowser').browser,
 	canRenegotiate = false,
 	oldSpecRTCOfferOptions = false,
 	browserVersion = Number(browser.version) || 0,
-	Browser = { name: browser.name, version: browserVersion },
-	isDesktop = !!(!browser.mobile || !browser.tablet),
+	isDesktop = !!(!browser.mobile && !browser.tablet),
 	hasWebRTC = false,
 	virtGlobal, virtNavigator;
 
@@ -22892,13 +23035,10 @@ function Adapter(options) {
 		RTCSessionDescription = pluginiface.RTCSessionDescription;
 		RTCIceCandidate = pluginiface.RTCIceCandidate;
 		MediaStreamTrack = pluginiface.MediaStreamTrack;
-		// TODO: getSources() freezes IE so disable it.
-		if (browser.safari) {
-			if (MediaStreamTrack && MediaStreamTrack.getSources) {
-				getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
-			} else if (virtNavigator.getMediaDevices) {
-				getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
-			}
+		if (MediaStreamTrack && MediaStreamTrack.getSources) {
+			getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
+		} else if (virtNavigator.getMediaDevices) {
+			getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
 		}
 		attachMediaStream = pluginiface.attachMediaStream;
 		canRenegotiate = pluginiface.canRenegotiate;
@@ -22979,9 +23119,6 @@ function Adapter(options) {
 			}
 		};
 	}
-
-	// Expose browser
-	Adapter.Browser = Browser;
 
 	// Expose RTCPeerConnection.
 	Adapter.RTCPeerConnection = RTCPeerConnection || throwNonSupported('RTCPeerConnection');
@@ -23101,7 +23238,7 @@ function Adapter(options) {
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"bowser":38,"debug":39}],35:[function(require,module,exports){
+},{"bowser":38,"debug":31}],35:[function(require,module,exports){
 'use strict';
 
 // Expose the RTCPeerConnection class.
@@ -23121,8 +23258,7 @@ var merge = require('merge'),
 		REGEXP_FIX_CANDIDATE: new RegExp(/(^a=|\r|\n)/gi),
 		REGEXP_RELAY_CANDIDATE: new RegExp(/ relay /i),
 		REGEXP_SDP_CANDIDATES: new RegExp(/^a=candidate:.*\r\n/igm),
-		REGEXP_SDP_NON_RELAY_CANDIDATES: new RegExp(/^a=candidate:(.(?!relay ))*\r\n/igm),
-		REGEXP_SDP_TELEPHONE_EVENT: new RegExp(/^a=rtpmap:\s?(\d+)\s+telephone-event(.+)/im)
+		REGEXP_SDP_NON_RELAY_CANDIDATES: new RegExp(/^a=candidate:(.(?!relay ))*\r\n/igm)
 	},
 
 	// Internal variables.
@@ -23314,25 +23450,7 @@ RTCPeerConnection.prototype.setLocalDescription = function (description, success
 RTCPeerConnection.prototype.setRemoteDescription = function (description, successCallback, failureCallback) {
 	debug('setRemoteDescription()');
 
-	var self = this,
-		DTMFPayload;
-
-	/* Remote DTMF payload change makes Chrome fail
-	 * https://code.google.com/p/webrtc/issues/detail?id=2350
-	 * always provide RTCPeerConnection with the initial remote DTMF payload
-	 */
-	if (Adapter.Browser.name === 'Chrome') {
-		DTMFPayload = description.sdp.match(C.REGEXP_SDP_TELEPHONE_EVENT);
-		if (DTMFPayload && DTMFPayload.length >= 2) {
-			if (typeof this.DTMFPayload === 'undefined') {
-				this.DTMFPayload = DTMFPayload[1];
-				debug("remote DTMF payload: " + this.DTMFPayload);
-			} else if (this.DTMFPayload !== DTMFPayload[1]) {
-				description.sdp = description.sdp.replace(new RegExp('(^m=audio .+?)(\\s' + DTMFPayload[1] + '(\\s|\r\n))(.+)?','im'),'$1 $3');
-				debug("remote DTMF payload changed to: " + DTMFPayload[1] + ". Removed from the format list");
-			}
-		}
-	}
+	var self = this;
 
 	this.pc.setRemoteDescription(
 		description,
@@ -23871,7 +23989,7 @@ function setProperties() {
 	});
 }
 
-},{"./Adapter":34,"debug":39,"merge":42}],36:[function(require,module,exports){
+},{"./Adapter":34,"debug":31,"merge":39}],36:[function(require,module,exports){
 'use strict';
 
 module.exports = rtcninja;
@@ -23879,7 +23997,7 @@ module.exports = rtcninja;
 
 // Dependencies.
 
-var browser = require('bowser').browser,
+var browser = require('bowser'),
 	debug = require('debug')('rtcninja'),
 	debugerror = require('debug')('rtcninja:ERROR'),
 	version = require('./version'),
@@ -23961,22 +24079,22 @@ Object.defineProperty(rtcninja, 'called', {
 rtcninja.debug = require('debug');
 rtcninja.browser = browser;
 
-},{"./Adapter":34,"./RTCPeerConnection":35,"./version":37,"bowser":38,"debug":39}],37:[function(require,module,exports){
+},{"./Adapter":34,"./RTCPeerConnection":35,"./version":37,"bowser":38,"debug":31}],37:[function(require,module,exports){
 'use strict';
 
 // Expose the 'version' field of package.json.
 module.exports = require('../package.json').version;
 
 
-},{"../package.json":43}],38:[function(require,module,exports){
+},{"../package.json":40}],38:[function(require,module,exports){
 /*!
   * Bowser - a browser detector
   * https://github.com/ded/bowser
-  * MIT License | (c) Dustin Diaz 2014
+  * MIT License | (c) Dustin Diaz 2015
   */
 
 !function (name, definition) {
-  if (typeof module != 'undefined' && module.exports) module.exports['browser'] = definition()
+  if (typeof module != 'undefined' && module.exports) module.exports = definition()
   else if (typeof define == 'function' && define.amd) define(definition)
   else this[name] = definition()
 }('bowser', function () {
@@ -24001,6 +24119,7 @@ module.exports = require('../package.json').version;
     var iosdevice = getFirstMatch(/(ipod|iphone|ipad)/i).toLowerCase()
       , likeAndroid = /like android/i.test(ua)
       , android = !likeAndroid && /android/i.test(ua)
+      , chromeBook = /CrOS/.test(ua)
       , edgeVersion = getFirstMatch(/edge\/(\d+(\.\d+)?)/i)
       , versionIdentifier = getFirstMatch(/version\/(\d+(\.\d+)?)/i)
       , tablet = /tablet/i.test(ua)
@@ -24012,6 +24131,13 @@ module.exports = require('../package.json').version;
         name: 'Opera'
       , opera: t
       , version: versionIdentifier || getFirstMatch(/(?:opera|opr)[\s\/](\d+(\.\d+)?)/i)
+      }
+    }
+    else if (/yabrowser/i.test(ua)) {
+      result = {
+        name: 'Yandex Browser'
+      , yandexbrowser: t
+      , version: versionIdentifier || getFirstMatch(/(?:yabrowser)[\s\/](\d+(\.\d+)?)/i)
       }
     }
     else if (/windows phone/i.test(ua)) {
@@ -24034,8 +24160,14 @@ module.exports = require('../package.json').version;
       , msie: t
       , version: getFirstMatch(/(?:msie |rv:)(\d+(\.\d+)?)/i)
       }
-    }
-    else if (/chrome.+? edge/i.test(ua)) {
+    } else if (chromeBook) {
+      result = {
+        name: 'Chrome'
+      , chromeBook: t
+      , chrome: t
+      , version: getFirstMatch(/(?:chrome|crios|crmo)\/(\d+(\.\d+)?)/i)
+      }
+    } else if (/chrome.+? edge/i.test(ua)) {
       result = {
         name: 'Microsoft Edge'
       , msedge: t
@@ -24200,6 +24332,7 @@ module.exports = require('../package.json').version;
     // http://developer.yahoo.com/yui/articles/gbs
     if (result.msedge ||
         (result.msie && result.version >= 10) ||
+        (result.yandexbrowser && result.version >= 15) ||
         (result.chrome && result.version >= 20) ||
         (result.firefox && result.version >= 20.0) ||
         (result.safari && result.version >= 6) ||
@@ -24247,12 +24380,6 @@ module.exports = require('../package.json').version;
 });
 
 },{}],39:[function(require,module,exports){
-arguments[4][31][0].apply(exports,arguments)
-},{"./debug":40,"dup":31}],40:[function(require,module,exports){
-arguments[4][32][0].apply(exports,arguments)
-},{"dup":32,"ms":41}],41:[function(require,module,exports){
-arguments[4][33][0].apply(exports,arguments)
-},{"dup":33}],42:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.2.0
  * @author yeikos
@@ -24428,14 +24555,21 @@ arguments[4][33][0].apply(exports,arguments)
 	}
 
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],43:[function(require,module,exports){
+},{}],40:[function(require,module,exports){
 module.exports={
   "name": "rtcninja",
-  "version": "0.6.1",
+  "version": "0.6.4",
   "description": "WebRTC API wrapper to deal with different browsers",
-  "author": "Iñaki Baz Castillo <inaki.baz@eface2face.com> (http://eface2face.com)",
+  "author": {
+    "name": "Iñaki Baz Castillo",
+    "email": "inaki.baz@eface2face.com",
+    "url": "http://eface2face.com"
+  },
   "contributors": [
-    "Jesús Pérez <jesus.perez@eface2face.com>"
+    {
+      "name": "Jesús Pérez",
+      "email": "jesus.perez@eface2face.com"
+    }
   ],
   "license": "MIT",
   "main": "lib/rtcninja.js",
@@ -24451,29 +24585,39 @@ module.exports={
     "node": ">=0.10.32"
   },
   "dependencies": {
-    "bowser": "^0.7.3",
+    "bowser": "^1.0.0",
     "debug": "^2.2.0",
     "merge": "^1.2.0"
   },
   "devDependencies": {
-    "browserify": "^10.2.3",
+    "browserify": "^11.0.1",
     "gulp": "git+https://github.com/gulpjs/gulp.git#4.0",
     "gulp-expect-file": "0.0.7",
     "gulp-filelog": "^0.4.1",
-    "gulp-header": "^1.2.2",
-    "gulp-jscs": "^1.6.0",
-    "gulp-jscs-stylish": "^1.1.0",
-    "gulp-jshint": "^1.11.0",
+    "gulp-header": "^1.7.1",
+    "gulp-jscs": "^2.0.0",
+    "gulp-jscs-stylish": "^1.1.2",
+    "gulp-jshint": "^1.11.2",
     "gulp-rename": "^1.2.2",
-    "gulp-uglify": "^1.2.0",
-    "jshint-stylish": "^1.0.2",
-    "retire": "^1.1.0",
-    "shelljs": "^0.5.0",
+    "gulp-uglify": "^1.4.0",
+    "jshint-stylish": "^2.0.1",
+    "retire": "^1.1.1",
+    "shelljs": "^0.5.3",
     "vinyl-source-stream": "^1.1.0"
-  }
+  },
+  "readme": "# rtcninja.js <img src=\"http://www.pubnub.com/blog/wp-content/uploads/2014/01/google-webrtc-logo.png\" height=\"30\" width=\"30\">\n\nWebRTC API wrapper to deal with different browsers transparently, [eventually](http://iswebrtcreadyyet.com/) this library shouldn't be needed. We only have to wait until W3C group in charge [finishes the specification](https://tools.ietf.org/wg/rtcweb/) and the different browsers implement it correctly :sweat_smile:.\n\n<img src=\"http://images4.fanpop.com/image/photos/21800000/browser-fight-google-chrome-21865454-600-531.jpg\" height=\"250\" width=\"250\">\n\nSupported environments:\n* [Google Chrome](https://www.google.com/chrome/browser/desktop/index.html) (desktop & mobile)\n* [Google Canary](https://www.google.com/chrome/browser/canary.html) (desktop & mobile)\n* [Mozilla Firefox](https://www.mozilla.org/en-GB/firefox/new) (desktop & mobile)\n* [Firefox Nigthly](https://nightly.mozilla.org/) (desktop & mobile)\n* [Opera](http://www.opera.com/)\n* [Vivaldi](https://vivaldi.com/)\n* [CrossWalk](https://crosswalk-project.org/)\n* [Cordova](cordova.apache.org): iOS support, you only have to use our plugin [following these steps](https://github.com/eface2face/cordova-plugin-iosrtc#usage).\n* [Node-webkit](https://github.com/nwjs/nw.js/)\n\n\n## Installation\n\n### **npm**:\n\n```bash\n$ npm install rtcninja\n```\n\nand then:\n\n```javascript\nvar rtcninja = require('rtcninja');\n```\n\n### **bower**:\n\n```bash\n$ bower install rtcninja\n```\n\n\n## Browserified library\n\nTake a browserified version of the library from the `dist/` folder:\n\n* `dist/rtcninja.js`: The uncompressed version.\n* `dist/rtcninja.min.js`: The compressed production-ready version.\n\nThey expose the global `window.rtcninja` module.\n\n\n## Usage\n\nIn the [examples](./examples/) folder we provide a complete one.\n\n```javascript\n// Must first call it.\nrtcninja();\n\n// Then check.\nif (rtcninja.hasWebRTC()) {\n    // Do something.\n}\nelse {\n    // Do something.\n}\n```\n\n\n## Documentation\n\nYou can read the full [API documentation](docs/index.md) in the docs folder.\n\n\n## Issues\n\nhttps://github.com/eface2face/rtcninja.js/issues\n\n\n## Developer guide\n\n* Create a branch with a name including your user and a meaningful word about the fix/feature you're going to implement, ie: \"jesusprubio/fixstuff\"\n* Use [GitHub pull requests](https://help.github.com/articles/using-pull-requests).\n* Conventions:\n * We use [JSHint](http://jshint.com/) and [Crockford's Styleguide](http://javascript.crockford.com/code.html).\n * Please run `grunt lint` to be sure your code fits with them.\n\n\n### Debugging\n\nThe library includes the Node [debug](https://github.com/visionmedia/debug) module. In order to enable debugging:\n\nIn Node set the `DEBUG=rtcninja*` environment variable before running the application, or set it at the top of the script:\n\n```javascript\nprocess.env.DEBUG = 'rtcninja*';\n```\n\nIn the browser run `rtcninja.debug.enable('rtcninja*');` and reload the page. Note that the debugging settings are stored into the browser LocalStorage. To disable it run `rtcninja.debug.disable('rtcninja*');`.\n\n\n## Copyright & License\n\n* eFace2Face Inc.\n* [MIT](./LICENSE)\n",
+  "readmeFilename": "README.md",
+  "gitHead": "18789cbefdb5a6c6c038ab4f1ce8e9e3813135b0",
+  "bugs": {
+    "url": "https://github.com/eface2face/rtcninja.js/issues"
+  },
+  "_id": "rtcninja@0.6.4",
+  "scripts": {},
+  "_shasum": "7ede8577ce978cb431772d877967c53aadeb5e99",
+  "_from": "rtcninja@>=0.6.4 <0.7.0"
 }
 
-},{}],44:[function(require,module,exports){
+},{}],41:[function(require,module,exports){
 var grammar = module.exports = {
   v: [{
       name: 'version',
@@ -24523,17 +24667,21 @@ var grammar = module.exports = {
   a: [
     { //a=rtpmap:110 opus/48000/2
       push: 'rtp',
-      reg: /^rtpmap:(\d*) ([\w\-]*)\/(\d*)(?:\s*\/(\S*))?/,
+      reg: /^rtpmap:(\d*) ([\w\-]*)(?:\s*\/(\d*)(?:\s*\/(\S*))?)?/,
       names: ['payload', 'codec', 'rate', 'encoding'],
       format: function (o) {
         return (o.encoding) ?
           "rtpmap:%d %s/%s/%s":
-          "rtpmap:%d %s/%s";
+          o.rate ?
+          "rtpmap:%d %s/%s":
+          "rtpmap:%d %s";
       }
     },
-    { //a=fmtp:108 profile-level-id=24;object=23;bitrate=64000
+    {
+      //a=fmtp:108 profile-level-id=24;object=23;bitrate=64000
+      //a=fmtp:111 minptime=10; useinbandfec=1
       push: 'fmtp',
-      reg: /^fmtp:(\d*) (\S*)/,
+      reg: /^fmtp:(\d*) ([\S| ]*)/,
       names: ['payload', 'config'],
       format: "fmtp:%d %s"
     },
@@ -24722,7 +24870,7 @@ Object.keys(grammar).forEach(function (key) {
   });
 });
 
-},{}],45:[function(require,module,exports){
+},{}],42:[function(require,module,exports){
 var parser = require('./parser');
 var writer = require('./writer');
 
@@ -24732,7 +24880,7 @@ exports.parseFmtpConfig = parser.parseFmtpConfig;
 exports.parsePayloads = parser.parsePayloads;
 exports.parseRemoteCandidates = parser.parseRemoteCandidates;
 
-},{"./parser":46,"./writer":47}],46:[function(require,module,exports){
+},{"./parser":43,"./writer":44}],43:[function(require,module,exports){
 var toIntIfInt = function (v) {
   return String(Number(v)) === v ? Number(v) : v;
 };
@@ -24807,7 +24955,7 @@ var fmtpReducer = function (acc, expr) {
 };
 
 exports.parseFmtpConfig = function (str) {
-  return str.split(';').reduce(fmtpReducer, {});
+  return str.split(/\;\s?/).reduce(fmtpReducer, {});
 };
 
 exports.parsePayloads = function (str) {
@@ -24827,7 +24975,7 @@ exports.parseRemoteCandidates = function (str) {
   return candidates;
 };
 
-},{"./grammar":44}],47:[function(require,module,exports){
+},{"./grammar":41}],44:[function(require,module,exports){
 var grammar = require('./grammar');
 
 // customized util.format - discards excess arguments and can void middle ones
@@ -24943,9 +25091,10 @@ module.exports = function (session, opts) {
   return sdp.join('\r\n') + '\r\n';
 };
 
-},{"./grammar":44}],48:[function(require,module,exports){
+},{"./grammar":41}],45:[function(require,module,exports){
 var _global = (function() { return this; })();
 var nativeWebSocket = _global.WebSocket || _global.MozWebSocket;
+var websocket_version = require('./version');
 
 
 /**
@@ -24977,13 +25126,13 @@ function W3CWebSocket(uri, protocols) {
  */
 module.exports = {
     'w3cwebsocket' : nativeWebSocket ? W3CWebSocket : null,
-    'version'      : require('./version')
+    'version'      : websocket_version
 };
 
-},{"./version":49}],49:[function(require,module,exports){
+},{"./version":46}],46:[function(require,module,exports){
 module.exports = require('../package.json').version;
 
-},{"../package.json":50}],50:[function(require,module,exports){
+},{"../package.json":47}],47:[function(require,module,exports){
 module.exports={
   "name": "websocket",
   "description": "Websocket Client & Server Library implementing the WebSocket protocol as specified in RFC 6455.",
@@ -25004,7 +25153,14 @@ module.exports={
     "email": "brian@worlize.com",
     "url": "https://www.worlize.com/"
   },
-  "version": "1.0.19",
+  "contributors": [
+    {
+      "name": "Iñaki Baz Castillo",
+      "email": "ibc@aliax.net",
+      "url": "http://dev.sipdoc.net"
+    }
+  ],
+  "version": "1.0.22",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/theturtle32/WebSocket-Node.git"
@@ -25014,17 +25170,18 @@ module.exports={
     "node": ">=0.8.0"
   },
   "dependencies": {
-    "debug": "~2.1.0",
-    "nan": "1.8.x",
-    "typedarray-to-buffer": "~3.0.0"
+    "debug": "~2.2.0",
+    "nan": "~2.0.5",
+    "typedarray-to-buffer": "~3.0.3",
+    "yaeti": "~0.0.4"
   },
   "devDependencies": {
-    "buffer-equal": "0.0.1",
-    "faucet": "0.0.1",
+    "buffer-equal": "^0.0.1",
+    "faucet": "^0.0.1",
     "gulp": "git+https://github.com/gulpjs/gulp.git#4.0",
-    "gulp-jshint": "^1.9.0",
-    "jshint-stylish": "^1.0.0",
-    "tape": "^3.0.0"
+    "gulp-jshint": "^1.11.2",
+    "jshint-stylish": "^1.0.2",
+    "tape": "^4.0.1"
   },
   "config": {
     "verbose": false
@@ -25040,15 +25197,15 @@ module.exports={
   },
   "browser": "lib/browser.js",
   "license": "Apache-2.0",
-  "gitHead": "da3bd5b04e9442c84881b2e9c13432cdbbae1f16",
+  "gitHead": "19108bbfd7d94a5cd02dbff3495eafee9e901ca4",
   "bugs": {
     "url": "https://github.com/theturtle32/WebSocket-Node/issues"
   },
-  "_id": "websocket@1.0.19",
-  "_shasum": "e62dbf1a3c5e0767425db7187cfa38f921dfb42c",
-  "_from": "websocket@>=1.0.18 <2.0.0",
-  "_npmVersion": "2.10.1",
-  "_nodeVersion": "0.12.4",
+  "_id": "websocket@1.0.22",
+  "_shasum": "8c33e3449f879aaf518297c9744cebf812b9e3d8",
+  "_from": "websocket@>=1.0.22 <2.0.0",
+  "_npmVersion": "2.14.3",
+  "_nodeVersion": "3.3.1",
   "_npmUser": {
     "name": "theturtle32",
     "email": "brian@worlize.com"
@@ -25060,19 +25217,18 @@ module.exports={
     }
   ],
   "dist": {
-    "shasum": "e62dbf1a3c5e0767425db7187cfa38f921dfb42c",
-    "tarball": "http://registry.npmjs.org/websocket/-/websocket-1.0.19.tgz"
+    "shasum": "8c33e3449f879aaf518297c9744cebf812b9e3d8",
+    "tarball": "http://registry.npmjs.org/websocket/-/websocket-1.0.22.tgz"
   },
-  "_resolved": "https://registry.npmjs.org/websocket/-/websocket-1.0.19.tgz",
-  "readme": "ERROR: No README data found!"
+  "_resolved": "https://registry.npmjs.org/websocket/-/websocket-1.0.22.tgz"
 }
 
-},{}],51:[function(require,module,exports){
+},{}],48:[function(require,module,exports){
 module.exports={
   "name": "jssip",
   "title": "JsSIP",
   "description": "the Javascript SIP library",
-  "version": "0.7.3",
+  "version": "0.7.9",
   "homepage": "http://jssip.net",
   "author": "José Luis Millán <jmillan@aliax.net> (https://github.com/jmillan)",
   "contributors": [
@@ -25098,22 +25254,21 @@ module.exports={
   },
   "dependencies": {
     "debug": "^2.2.0",
-    "rtcninja": "^0.6.3",
-    "sdp-transform": "~1.4.0",
-    "websocket": "^1.0.21"
+    "rtcninja": "^0.6.4",
+    "sdp-transform": "~1.5.0",
+    "websocket": "^1.0.22"
   },
   "devDependencies": {
-    "browserify": "^11.0.0",
+    "browserify": "^11.2.0",
     "gulp": "git+https://github.com/gulpjs/gulp.git#4.0",
     "gulp-expect-file": "0.0.7",
-    "gulp-filelog": "^0.4.1",
-    "gulp-header": "^1.2.2",
+    "gulp-header": "^1.7.1",
     "gulp-jshint": "^1.11.2",
     "gulp-nodeunit-runner": "^0.2.2",
     "gulp-rename": "^1.2.2",
-    "gulp-uglify": "^1.2.0",
+    "gulp-uglify": "^1.4.2",
     "gulp-util": "^3.0.6",
-    "jshint-stylish": "^1.0.1",
+    "jshint-stylish": "^2.0.1",
     "pegjs": "0.7.0",
     "vinyl-source-stream": "^1.1.0"
   },
